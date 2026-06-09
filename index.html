@@ -269,6 +269,33 @@
       transition: all 0.15s;
     }
     .del-btn:hover { color: var(--expense); background: #fee2e2; }
+    .edit-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #d1d5db;
+      font-size: 14px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      line-height: 1;
+      transition: all 0.15s;
+    }
+    .edit-btn:hover { color: var(--income); background: #dbeafe; }
+    .tx-filter-bar { display: flex; gap: 6px; margin-bottom: 12px; }
+    .tx-filter-btn {
+      padding: 4px 12px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: white;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      transition: all 0.15s;
+    }
+    .tx-filter-btn.active { background: var(--text); color: white; border-color: var(--text); }
+    .tx-filter-btn.income.active { background: var(--income); border-color: var(--income); color: white; }
+    .tx-filter-btn.expense.active { background: var(--expense); border-color: var(--expense); color: white; }
 
     /* Report */
     .year-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -510,6 +537,11 @@
     <!-- Row 4: Transaction list -->
     <div class="card">
       <div class="card-title">取引一覧</div>
+      <div class="tx-filter-bar">
+        <button class="tx-filter-btn active" data-filter="all" onclick="setTxFilter('all')">全件</button>
+        <button class="tx-filter-btn income" data-filter="income" onclick="setTxFilter('income')">収入</button>
+        <button class="tx-filter-btn expense" data-filter="expense" onclick="setTxFilter('expense')">経費</button>
+      </div>
       <div id="tx-list">
         <div class="loading">読み込み中...</div>
       </div>
@@ -574,6 +606,51 @@
   </div>
 </div>
 
+<!-- ── Transaction Edit Modal ── -->
+<div class="modal-overlay" id="modal-tx">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>取引を修正</h3>
+      <button class="modal-close" onclick="closeTxModal()">✕</button>
+    </div>
+    <div class="type-toggle" id="emodal-type-toggle">
+      <button class="type-btn income active" onclick="setEType('income')">収入</button>
+      <button class="type-btn expense" onclick="setEType('expense')">経費</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>日付</label>
+        <input type="date" id="e-date">
+      </div>
+      <div class="form-group">
+        <label>勘定科目</label>
+        <select id="e-account"></select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>摘要</label>
+      <input type="text" id="e-memo" placeholder="任意">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>金額（円）</label>
+        <input type="number" id="e-amount" min="1" inputmode="numeric">
+      </div>
+      <div class="form-group" id="e-alloc-wrap">
+        <label>按分率（%）</label>
+        <input type="number" id="e-allocation" min="1" max="100" inputmode="numeric">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger btn-sm" onclick="deleteTxFromModal()">削除</button>
+      <div class="ml-auto">
+        <button class="btn btn-outline btn-sm" onclick="closeTxModal()">キャンセル</button>
+        <button class="btn btn-primary btn-sm" onclick="updateTransaction()" style="width:auto">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toast ── -->
 <div class="toast" id="toast"></div>
 
@@ -604,7 +681,10 @@ const S = {
   navDate:           new Date(),
   currentType:       'income',
   tCurrentType:      'income',
+  eCurrentType:      'income',
   editingTemplateId: null,
+  editingTxId:       null,
+  txFilter:          'all',
   monthlyChart:      null,
   categoryChart:     null,
 }
@@ -615,6 +695,7 @@ async function init() {
   populateReportYears()
   updateAccountOptions('f-account', 'income')
   updateAccountOptions('t-account', 'income')
+  updateAccountOptions('e-account', 'income')
 
   const { data: { session } } = await sb.auth.getSession()
   if (session) await enterApp(session.user)
@@ -713,6 +794,63 @@ async function deleteTransaction(id) {
   if (error) { alert('削除失敗: ' + error.message); return }
   await loadTransactions()
   render()
+}
+
+function openEditTx(t) {
+  S.editingTxId  = t.id
+  S.eCurrentType = t.type
+  setEType(t.type)
+  document.getElementById('e-date').value       = t.date
+  document.getElementById('e-account').value    = t.account
+  document.getElementById('e-memo').value       = t.memo || ''
+  document.getElementById('e-amount').value     = t.amount
+  document.getElementById('e-allocation').value = Math.round(parseFloat(t.allocation_rate) * 100)
+  document.getElementById('modal-tx').classList.add('open')
+}
+
+function closeTxModal() {
+  document.getElementById('modal-tx').classList.remove('open')
+}
+
+async function updateTransaction() {
+  const amount = parseInt(document.getElementById('e-amount').value)
+  if (!amount || amount < 1) { alert('金額を入力してください'); return }
+
+  const alloc = S.eCurrentType === 'expense'
+    ? clamp(parseInt(document.getElementById('e-allocation').value) || 100, 1, 100) / 100
+    : 1.0
+
+  const { error } = await sb.from('transactions').update({
+    date:            document.getElementById('e-date').value,
+    type:            S.eCurrentType,
+    account:         document.getElementById('e-account').value,
+    memo:            document.getElementById('e-memo').value.trim(),
+    amount,
+    allocation_rate: alloc,
+  }).eq('id', S.editingTxId)
+
+  if (error) { alert('更新失敗: ' + error.message); return }
+  closeTxModal()
+  toast('取引を更新しました')
+  await loadTransactions()
+  render()
+}
+
+async function deleteTxFromModal() {
+  if (!confirm('この取引を削除しますか？')) return
+  const { error } = await sb.from('transactions').delete().eq('id', S.editingTxId)
+  if (error) { alert('削除失敗: ' + error.message); return }
+  closeTxModal()
+  await loadTransactions()
+  render()
+}
+
+function setTxFilter(filter) {
+  S.txFilter = filter
+  document.querySelectorAll('.tx-filter-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.filter === filter)
+  )
+  renderTxList()
 }
 
 function applyTemplate(t) {
@@ -902,24 +1040,25 @@ function renderTemplates() {
 }
 
 function renderTxList() {
-  const txs = filteredTx()
-  const el  = document.getElementById('tx-list')
+  let txs = filteredTx()
+  if (S.txFilter !== 'all') txs = txs.filter(t => t.type === S.txFilter)
+  const el = document.getElementById('tx-list')
   if (txs.length === 0) {
     el.innerHTML = '<div class="empty">取引データがありません</div>'
     return
   }
+  const showAlloc = S.txFilter !== 'income'
   el.innerHTML = `
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>日付</th>
-            <th>種別</th>
+            ${S.txFilter === 'all' ? '<th>種別</th>' : ''}
             <th>勘定科目</th>
             <th>摘要</th>
-            <th style="text-align:right">元金額</th>
-            <th style="text-align:right">按分率</th>
-            <th style="text-align:right">按分後</th>
+            <th style="text-align:right">金額</th>
+            ${showAlloc ? '<th style="text-align:right">按分率</th><th style="text-align:right">按分後</th>' : ''}
             <th></th>
           </tr>
         </thead>
@@ -927,19 +1066,34 @@ function renderTxList() {
           ${txs.map(t => `
             <tr>
               <td>${t.date}</td>
-              <td><span class="badge ${t.type}">${t.type === 'income' ? '収入' : '経費'}</span></td>
+              ${S.txFilter === 'all' ? `<td><span class="badge ${t.type}">${t.type === 'income' ? '収入' : '経費'}</span></td>` : ''}
               <td>${esc(t.account)}</td>
               <td style="color:var(--muted);font-size:12px">${esc(t.memo || '–')}</td>
               <td class="amount-cell">${yen(t.amount)}</td>
-              <td class="amount-cell" style="color:var(--muted)">${Math.round(parseFloat(t.allocation_rate) * 100)}%</td>
-              <td class="amount-cell">${yen(allocAmt(t))}</td>
-              <td><button class="del-btn" onclick="deleteTransaction('${t.id}')" title="削除">×</button></td>
+              ${showAlloc ? `
+                <td class="amount-cell" style="color:var(--muted)">${Math.round(parseFloat(t.allocation_rate) * 100)}%</td>
+                <td class="amount-cell">${yen(allocAmt(t))}</td>
+              ` : ''}
+              <td style="white-space:nowrap">
+                <button class="edit-btn" data-id="${t.id}" title="修正">✎</button>
+                <button class="del-btn" data-id="${t.id}" title="削除">×</button>
+              </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     </div>
   `
+  // idを使ったevent delegation（onclick属性でJSONエスケープ不要に）
+  el.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const t = S.transactions.find(x => x.id === btn.dataset.id)
+      if (t) openEditTx(t)
+    })
+  })
+  el.querySelectorAll('.del-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteTransaction(btn.dataset.id))
+  })
 }
 
 function renderMonthlyChart() {
@@ -1100,6 +1254,15 @@ function setTType(type) {
   document.getElementById('t-alloc-wrap').style.display = type === 'expense' ? '' : 'none'
 }
 
+function setEType(type) {
+  S.eCurrentType = type
+  document.querySelectorAll('#emodal-type-toggle .type-btn').forEach(b =>
+    b.classList.toggle('active', b.classList.contains(type))
+  )
+  updateAccountOptions('e-account', type)
+  document.getElementById('e-alloc-wrap').style.display = type === 'expense' ? '' : 'none'
+}
+
 function updateAccountOptions(selId, type) {
   const sel      = document.getElementById(selId)
   const accounts = type === 'income' ? INCOME_ACCOUNTS : EXPENSE_ACCOUNTS
@@ -1140,6 +1303,9 @@ function toast(msg) {
 // Close modal on overlay click
 document.getElementById('modal-template').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeModal()
+})
+document.getElementById('modal-tx').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeTxModal()
 })
 
 // ─── Start ────────────────────────────────────────────────────────────────────
