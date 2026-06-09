@@ -715,19 +715,16 @@ async function deleteTransaction(id) {
   render()
 }
 
-async function applyTemplate(t) {
-  const { error } = await sb.from('transactions').insert({
-    date:            todayStr(),
-    type:            t.type,
-    account:         t.account,
-    memo:            t.memo || '',
-    amount:          t.amount,
-    allocation_rate: t.allocation_rate,
-  })
-  if (error) { alert('登録失敗: ' + error.message); return }
-  toast(`${t.name}を登録しました`)
-  await loadTransactions()
-  render()
+function applyTemplate(t) {
+  setType(t.type)
+  document.getElementById('f-account').value    = t.account
+  document.getElementById('f-memo').value       = t.memo || ''
+  document.getElementById('f-amount').value     = t.amount
+  document.getElementById('f-allocation').value = Math.round(parseFloat(t.allocation_rate) * 100)
+  updateAllocHint()
+  document.getElementById('f-date').focus()
+  document.getElementById('f-date').scrollIntoView({ behavior: 'smooth', block: 'center' })
+  toast(`${t.name}をフォームに展開しました。日付を確認して「記録する」を押してください`)
 }
 
 // ─── Template CRUD ────────────────────────────────────────────────────────────
@@ -883,20 +880,17 @@ function renderTemplates() {
       <div class="t-name" title="${esc(t.name)}">${esc(t.name)}</div>
       <div class="t-account">${esc(t.account)}</div>
       <div class="t-amount">${yen(alloc)}</div>
-      <div class="t-edit">ダブルタップで編集</div>
+      <div class="t-edit">長押しで編集</div>
     `
-    let clickTimer = null
-    card.addEventListener('click', () => {
-      if (clickTimer) {
-        clearTimeout(clickTimer)
-        clickTimer = null
-        openEditTemplate(t)
-      } else {
-        clickTimer = setTimeout(() => {
-          clickTimer = null
-          applyTemplate(t)
-        }, 250)
-      }
+    let pressTimer = null
+    card.addEventListener('pointerdown', () => {
+      pressTimer = setTimeout(() => { pressTimer = null; openEditTemplate(t) }, 600)
+    })
+    card.addEventListener('pointerup', () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; applyTemplate(t) }
+    })
+    card.addEventListener('pointerleave', () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
     })
     el.appendChild(card)
   })
