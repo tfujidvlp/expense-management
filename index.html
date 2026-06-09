@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>収支管理</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --income: #2563eb;
+      --expense: #dc2626;
+      --profit: #16a34a;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --radius: 8px;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    /* ── Auth ── */
+    #auth-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .auth-card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 32px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+    }
+    .auth-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .auth-card .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+    .auth-toggle { text-align: center; margin-top: 16px; font-size: 13px; color: var(--muted); }
+    .auth-toggle a { color: var(--income); cursor: pointer; text-decoration: underline; }
+    .auth-error { color: var(--expense); font-size: 12px; margin-top: 8px; }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px; color: var(--muted); }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      background: white;
+      color: var(--text);
+    }
+    .form-group input:focus,
+    .form-group select:focus { border-color: var(--income); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 8px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--income); color: white; width: 100%; padding: 10px; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-danger { background: var(--expense); color: white; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-outline { background: white; border: 1px solid var(--border); color: var(--text); }
+
+    /* ── App layout ── */
+    #app-screen { display: none; }
+
+    /* Top bar */
+    .topbar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar-brand { font-size: 15px; font-weight: 700; flex: none; }
+    .topbar-stats { display: flex; gap: 16px; flex: 1; flex-wrap: wrap; }
+    .stat-item { display: flex; flex-direction: column; }
+    .stat-label { font-size: 10px; color: var(--muted); }
+    .stat-value { font-size: 14px; font-weight: 700; }
+    .stat-item.income .stat-value { color: var(--income); }
+    .stat-item.expense .stat-value { color: var(--expense); }
+    .stat-item.profit .stat-value { color: var(--profit); }
+
+    /* Period bar */
+    .period-bar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .tab-group { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .tab-btn {
+      padding: 5px 12px;
+      background: white;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+      color: var(--muted);
+    }
+    .tab-btn.active { background: var(--income); color: white; }
+    .period-nav { display: flex; align-items: center; gap: 4px; }
+    .nav-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .nav-btn:hover { background: var(--bg); }
+    .period-label { font-size: 14px; font-weight: 600; min-width: 90px; text-align: center; }
+    .period-bar .ml-auto { margin-left: auto; }
+
+    /* Main */
+    .main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+
+    /* Card */
+    .card { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); }
+    .card-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+
+    /* Summary grid */
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .summary-card { border-radius: var(--radius); padding: 14px; border: 1px solid var(--border); background: white; }
+    .summary-card .s-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .summary-card .s-value { font-size: 18px; font-weight: 700; }
+    .summary-card .s-count { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .summary-card.income .s-value { color: var(--income); }
+    .summary-card.expense .s-value { color: var(--expense); }
+    .summary-card.profit .s-value { color: var(--profit); }
+
+    /* Two-col layout */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+
+    /* Templates */
+    .templates-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+    .templates-scroll::-webkit-scrollbar { height: 4px; }
+    .templates-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .template-card {
+      flex: none;
+      width: 120px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .template-card:hover { border-color: var(--income); background: #eff6ff; }
+    .template-card .t-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .template-card .t-account { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .template-card .t-amount { font-size: 15px; font-weight: 700; margin-top: 6px; }
+    .template-card.income-type .t-amount { color: var(--income); }
+    .template-card.expense-type .t-amount { color: var(--expense); }
+    .template-card .t-edit { font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .template-add {
+      flex: none;
+      width: 80px;
+      background: white;
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      color: var(--muted);
+    }
+    .template-add:hover { border-color: var(--income); color: var(--income); background: #eff6ff; }
+    .template-add-icon { font-size: 22px; line-height: 1; }
+    .template-add-label { font-size: 11px; font-weight: 500; }
+
+    /* Type toggle */
+    .type-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
+    .type-btn {
+      flex: 1;
+      padding: 8px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      background: white;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+      color: var(--muted);
+    }
+    .type-btn.income.active { border-color: var(--income); background: var(--income); color: white; }
+    .type-btn.expense.active { border-color: var(--expense); background: var(--expense); color: white; }
+
+    /* Transaction table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      background: var(--bg);
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .badge.income { background: #dbeafe; color: var(--income); }
+    .badge.expense { background: #fee2e2; color: var(--expense); }
+    .amount-cell { font-weight: 600; text-align: right; white-space: nowrap; font-feature-settings: 'tnum'; }
+    .del-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #d1d5db;
+      font-size: 18px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+      transition: all 0.15s;
+    }
+    .del-btn:hover { color: var(--expense); background: #fee2e2; }
+
+    /* Report */
+    .year-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .year-row label { font-size: 13px; }
+    .year-row select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+    .report-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      width: 100%;
+      max-width: 420px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-header h3 { font-size: 16px; font-weight: 600; }
+    .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); padding: 4px; }
+    .modal-footer { display: flex; gap: 8px; margin-top: 20px; align-items: center; }
+    .modal-footer .ml-auto { margin-left: auto; display: flex; gap: 8px; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2937;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      z-index: 200;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+
+    /* Chart containers */
+    .chart-wrap { position: relative; height: 200px; }
+    .chart-wrap-sm { position: relative; height: 180px; }
+
+    /* Empty */
+    .empty { text-align: center; color: var(--muted); padding: 32px; font-size: 13px; }
+
+    /* Loading */
+    .loading { text-align: center; color: var(--muted); padding: 16px; font-size: 13px; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .two-col { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: 1fr 1fr 1fr; }
+      .summary-card .s-value { font-size: 15px; }
+      .form-row { grid-template-columns: 1fr; }
+      .topbar-stats { gap: 12px; }
+      .period-bar .ml-auto { display: none; }
+      .stat-value { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Auth Screen ── -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <h1>収支管理</h1>
+    <p class="subtitle">個人事業主向け・青色申告対応</p>
+
+    <!-- Login -->
+    <div id="view-login">
+      <div class="form-group">
+        <label>メールアドレス</label>
+        <input type="email" id="login-email" placeholder="email@example.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label>パスワード</label>
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <div class="auth-error" id="login-error"></div>
+      <button class="btn btn-primary" style="margin-top:8px" onclick="login()">ログイン</button>
+      <div class="auth-toggle">新規登録は<a onclick="switchAuth('register')">こちら</a></div>
+    </div>
+
+    <!-- Register -->
+    <div id="view-register" style="display:none">
+      <div class="form-group">
+        <label>メールアドレス</label>
+        <input type="email" id="reg-email" placeholder="email@example.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label>パスワード（6文字以上）</label>
+        <input type="password" id="reg-password" placeholder="••••••••" autocomplete="new-password">
+      </div>
+      <div class="auth-error" id="reg-error"></div>
+      <button class="btn btn-primary" style="margin-top:8px" onclick="register()">新規登録</button>
+      <div class="auth-toggle">ログインは<a onclick="switchAuth('login')">こちら</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── App Screen ── -->
+<div id="app-screen">
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-brand">収支管理</div>
+    <div class="topbar-stats">
+      <div class="stat-item income">
+        <span class="stat-label">収入合計（全期間）</span>
+        <span class="stat-value" id="all-income">¥0</span>
+      </div>
+      <div class="stat-item expense">
+        <span class="stat-label">経費合計（全期間）</span>
+        <span class="stat-value" id="all-expense">¥0</span>
+      </div>
+      <div class="stat-item profit">
+        <span class="stat-label">利益（全期間）</span>
+        <span class="stat-value" id="all-profit">¥0</span>
+      </div>
+    </div>
+    <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="logout()">ログアウト</button>
+  </div>
+
+  <!-- Period bar -->
+  <div class="period-bar">
+    <div class="tab-group">
+      <button class="tab-btn active" data-mode="month" onclick="setMode('month')">月次</button>
+      <button class="tab-btn" data-mode="year" onclick="setMode('year')">年次</button>
+      <button class="tab-btn" data-mode="all" onclick="setMode('all')">全件</button>
+    </div>
+    <div class="period-nav" id="period-nav">
+      <button class="nav-btn" onclick="navigate(-1)">◀</button>
+      <span class="period-label" id="period-label">-</span>
+      <button class="nav-btn" onclick="navigate(1)">▶</button>
+    </div>
+    <button class="btn btn-outline btn-sm ml-auto" onclick="exportDetailCSV(false)">CSV出力</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+
+    <!-- Row 1: Summary + Monthly chart -->
+    <div class="two-col">
+      <div>
+        <div class="summary-grid">
+          <div class="summary-card income">
+            <div class="s-label">収入</div>
+            <div class="s-value" id="sum-income">¥0</div>
+            <div class="s-count" id="sum-income-count">0件</div>
+          </div>
+          <div class="summary-card expense">
+            <div class="s-label">経費</div>
+            <div class="s-value" id="sum-expense">¥0</div>
+            <div class="s-count" id="sum-expense-count">0件</div>
+          </div>
+          <div class="summary-card profit">
+            <div class="s-label">利益</div>
+            <div class="s-value" id="sum-profit">¥0</div>
+            <div class="s-count">&nbsp;</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">月別推移（直近12ヶ月）</div>
+        <div class="chart-wrap">
+          <canvas id="monthly-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Templates -->
+    <div class="card">
+      <div class="card-title">定型テンプレート（タップで今日の日付で登録・ダブルタップで編集）</div>
+      <div class="templates-scroll" id="templates-list">
+        <div class="loading">読み込み中...</div>
+      </div>
+    </div>
+
+    <!-- Row 3: Input form + Category chart -->
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">取引を記録</div>
+        <div class="type-toggle" id="main-type-toggle">
+          <button class="type-btn income active" onclick="setType('income')">収入</button>
+          <button class="type-btn expense" onclick="setType('expense')">経費</button>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>日付</label>
+            <input type="date" id="f-date">
+          </div>
+          <div class="form-group">
+            <label>勘定科目</label>
+            <select id="f-account" onchange="updateAllocHint()"></select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>摘要</label>
+          <input type="text" id="f-memo" placeholder="任意">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>金額（円）</label>
+            <input type="number" id="f-amount" placeholder="0" min="1" inputmode="numeric">
+          </div>
+          <div class="form-group" id="f-alloc-wrap">
+            <label>按分率（%）</label>
+            <input type="number" id="f-allocation" value="100" min="1" max="100" inputmode="numeric">
+            <div class="hint" id="alloc-hint"></div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveTransaction()">記録する</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">科目別経費（選択期間）</div>
+        <div class="chart-wrap-sm">
+          <canvas id="category-chart"></canvas>
+        </div>
+        <div class="empty" id="category-empty" style="display:none;padding:16px">経費データなし</div>
+      </div>
+    </div>
+
+    <!-- Row 4: Transaction list -->
+    <div class="card">
+      <div class="card-title">取引一覧</div>
+      <div id="tx-list">
+        <div class="loading">読み込み中...</div>
+      </div>
+    </div>
+
+    <!-- Row 5: Report -->
+    <div class="card">
+      <div class="card-title">確定申告レポート</div>
+      <div class="year-row">
+        <label>年度：</label>
+        <select id="report-year"></select>
+      </div>
+      <div class="report-btns">
+        <button class="btn btn-outline" onclick="exportDetailCSV(true)">取引明細CSV出力</button>
+        <button class="btn btn-outline" onclick="exportSummaryCSV()">科目別集計CSV出力</button>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app-screen -->
+
+<!-- ── Template Modal ── -->
+<div class="modal-overlay" id="modal-template">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="tmodal-title">テンプレート追加</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="type-toggle" id="tmodal-type-toggle">
+      <button class="type-btn income active" onclick="setTType('income')">収入</button>
+      <button class="type-btn expense" onclick="setTType('expense')">経費</button>
+    </div>
+    <div class="form-group">
+      <label>テンプレート名</label>
+      <input type="text" id="t-name" placeholder="例：自宅Wi-Fi">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>勘定科目</label>
+        <select id="t-account"></select>
+      </div>
+      <div class="form-group">
+        <label>金額（円）</label>
+        <input type="number" id="t-amount" placeholder="0" min="1" inputmode="numeric">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>摘要（省略可）</label>
+      <input type="text" id="t-memo" placeholder="任意">
+    </div>
+    <div class="form-group" id="t-alloc-wrap">
+      <label>按分率（%）</label>
+      <input type="number" id="t-allocation" value="100" min="1" max="100" inputmode="numeric">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger btn-sm" id="t-del-btn" style="display:none" onclick="deleteTemplate()">削除</button>
+      <div class="ml-auto">
+        <button class="btn btn-outline btn-sm" onclick="closeModal()">キャンセル</button>
+        <button class="btn btn-primary btn-sm" onclick="saveTemplate()" style="width:auto">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── Config ──────────────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://pzyjercohthjjimwiqfd.supabase.co'
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6eWplcmNvaHRoamppbXdpcWZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTc1MTgsImV4cCI6MjA5NjU3MzUxOH0.VfDp2fYYZDLUopBKIUIvX0PSvy39XbQht-9CCxCfJXw'
+
+const INCOME_ACCOUNTS  = ['売上高', '雑収入']
+const EXPENSE_ACCOUNTS = [
+  '租税公課','荷造運賃','水道光熱費','旅費交通費','通信費',
+  '広告宣伝費','接待交際費','損害保険料','修繕費','消耗品費',
+  '減価償却費','福利厚生費','給料賃金','外注工賃','地代家賃','雑費'
+]
+const ALLOC_HINTS = {
+  '地代家賃':   '目安 20〜30%（床面積比）',
+  '水道光熱費': '目安 20〜30%',
+  '通信費':     '目安 50〜80%',
+}
+
+// ─── State ───────────────────────────────────────────────────────────────────
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+
+const S = {
+  transactions:      [],
+  templates:         [],
+  mode:              'month',
+  navDate:           new Date(),
+  currentType:       'income',
+  tCurrentType:      'income',
+  editingTemplateId: null,
+  monthlyChart:      null,
+  categoryChart:     null,
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+async function init() {
+  document.getElementById('f-date').value = todayStr()
+  populateReportYears()
+  updateAccountOptions('f-account', 'income')
+  updateAccountOptions('t-account', 'income')
+
+  const { data: { session } } = await sb.auth.getSession()
+  if (session) await enterApp(session.user)
+
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN')  await enterApp(session.user)
+    if (event === 'SIGNED_OUT') {
+      document.getElementById('auth-screen').style.display = 'flex'
+      document.getElementById('app-screen').style.display  = 'none'
+    }
+  })
+
+  // Enter key on login
+  document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') login() })
+}
+
+async function enterApp(user) {
+  document.getElementById('auth-screen').style.display = 'none'
+  document.getElementById('app-screen').style.display  = 'block'
+  await Promise.all([loadTransactions(), loadTemplates()])
+  render()
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+function switchAuth(view) {
+  document.getElementById('view-login').style.display    = view === 'login'    ? '' : 'none'
+  document.getElementById('view-register').style.display = view === 'register' ? '' : 'none'
+}
+
+async function login() {
+  const email    = document.getElementById('login-email').value.trim()
+  const password = document.getElementById('login-password').value
+  const errEl    = document.getElementById('login-error')
+  errEl.textContent = ''
+  const { error } = await sb.auth.signInWithPassword({ email, password })
+  if (error) errEl.textContent = 'ログイン失敗: ' + error.message
+}
+
+async function register() {
+  const email    = document.getElementById('reg-email').value.trim()
+  const password = document.getElementById('reg-password').value
+  const errEl    = document.getElementById('reg-error')
+  errEl.textContent = ''
+  const { error } = await sb.auth.signUp({ email, password })
+  if (error) errEl.textContent = '登録失敗: ' + error.message
+  else alert('確認メールを送信しました。メールを確認してからログインしてください。')
+}
+
+async function logout() {
+  if (!confirm('ログアウトしますか？')) return
+  await sb.auth.signOut()
+}
+
+// ─── Data ────────────────────────────────────────────────────────────────────
+async function loadTransactions() {
+  const { data, error } = await sb.from('transactions').select('*').order('date', { ascending: false }).order('created_at', { ascending: false })
+  if (!error) S.transactions = data
+}
+
+async function loadTemplates() {
+  const { data, error } = await sb.from('templates').select('*').order('sort_order').order('created_at')
+  if (!error) S.templates = data
+}
+
+// ─── Transaction CRUD ─────────────────────────────────────────────────────────
+async function saveTransaction() {
+  const amount = parseInt(document.getElementById('f-amount').value)
+  if (!amount || amount < 1) { alert('金額を入力してください'); return }
+
+  const alloc = S.currentType === 'expense'
+    ? clamp(parseInt(document.getElementById('f-allocation').value) || 100, 1, 100) / 100
+    : 1.0
+
+  const { error } = await sb.from('transactions').insert({
+    date:            document.getElementById('f-date').value,
+    type:            S.currentType,
+    account:         document.getElementById('f-account').value,
+    memo:            document.getElementById('f-memo').value.trim(),
+    amount,
+    allocation_rate: alloc,
+  })
+  if (error) { alert('保存失敗: ' + error.message); return }
+
+  document.getElementById('f-amount').value     = ''
+  document.getElementById('f-memo').value       = ''
+  document.getElementById('f-allocation').value = '100'
+
+  toast('記録しました')
+  await loadTransactions()
+  render()
+}
+
+async function deleteTransaction(id) {
+  if (!confirm('この取引を削除しますか？')) return
+  const { error } = await sb.from('transactions').delete().eq('id', id)
+  if (error) { alert('削除失敗: ' + error.message); return }
+  await loadTransactions()
+  render()
+}
+
+async function applyTemplate(t) {
+  const { error } = await sb.from('transactions').insert({
+    date:            todayStr(),
+    type:            t.type,
+    account:         t.account,
+    memo:            t.memo || '',
+    amount:          t.amount,
+    allocation_rate: t.allocation_rate,
+  })
+  if (error) { alert('登録失敗: ' + error.message); return }
+  toast(`${t.name}を登録しました`)
+  await loadTransactions()
+  render()
+}
+
+// ─── Template CRUD ────────────────────────────────────────────────────────────
+function openAddTemplate() {
+  S.editingTemplateId = null
+  S.tCurrentType = 'income'
+  document.getElementById('tmodal-title').textContent = 'テンプレート追加'
+  document.getElementById('t-name').value       = ''
+  document.getElementById('t-amount').value     = ''
+  document.getElementById('t-memo').value       = ''
+  document.getElementById('t-allocation').value = '100'
+  document.getElementById('t-del-btn').style.display = 'none'
+  setTType('income')
+  document.getElementById('modal-template').classList.add('open')
+}
+
+function openEditTemplate(t) {
+  S.editingTemplateId = t.id
+  S.tCurrentType = t.type
+  document.getElementById('tmodal-title').textContent = 'テンプレート編集'
+  document.getElementById('t-name').value       = t.name
+  document.getElementById('t-amount').value     = t.amount
+  document.getElementById('t-memo').value       = t.memo || ''
+  document.getElementById('t-allocation').value = Math.round(parseFloat(t.allocation_rate) * 100)
+  document.getElementById('t-del-btn').style.display = ''
+  setTType(t.type)
+  document.getElementById('modal-template').classList.add('open')
+}
+
+function closeModal() {
+  document.getElementById('modal-template').classList.remove('open')
+}
+
+async function saveTemplate() {
+  const name   = document.getElementById('t-name').value.trim()
+  const amount = parseInt(document.getElementById('t-amount').value)
+  if (!name)              { alert('テンプレート名を入力してください'); return }
+  if (!amount || amount < 1) { alert('金額を入力してください'); return }
+
+  const alloc = S.tCurrentType === 'expense'
+    ? clamp(parseInt(document.getElementById('t-allocation').value) || 100, 1, 100) / 100
+    : 1.0
+
+  const row = {
+    name,
+    type:            S.tCurrentType,
+    account:         document.getElementById('t-account').value,
+    memo:            document.getElementById('t-memo').value.trim(),
+    amount,
+    allocation_rate: alloc,
+    sort_order:      S.editingTemplateId ? undefined : S.templates.length,
+  }
+  if (row.sort_order === undefined) delete row.sort_order
+
+  let error
+  if (S.editingTemplateId) {
+    ;({ error } = await sb.from('templates').update(row).eq('id', S.editingTemplateId))
+  } else {
+    ;({ error } = await sb.from('templates').insert(row))
+  }
+  if (error) { alert('保存失敗: ' + error.message); return }
+
+  closeModal()
+  toast(S.editingTemplateId ? 'テンプレートを更新しました' : 'テンプレートを追加しました')
+  await loadTemplates()
+  renderTemplates()
+}
+
+async function deleteTemplate() {
+  if (!confirm('このテンプレートを削除しますか？')) return
+  const { error } = await sb.from('templates').delete().eq('id', S.editingTemplateId)
+  if (error) { alert('削除失敗: ' + error.message); return }
+  closeModal()
+  toast('テンプレートを削除しました')
+  await loadTemplates()
+  renderTemplates()
+}
+
+// ─── Period ───────────────────────────────────────────────────────────────────
+function setMode(mode) {
+  S.mode = mode
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode))
+  document.getElementById('period-nav').style.visibility = mode === 'all' ? 'hidden' : 'visible'
+  render()
+}
+
+function navigate(dir) {
+  const d = new Date(S.navDate)
+  if (S.mode === 'month') d.setMonth(d.getMonth() + dir)
+  if (S.mode === 'year')  d.setFullYear(d.getFullYear() + dir)
+  S.navDate = d
+  render()
+}
+
+function filteredTx() {
+  if (S.mode === 'all') return S.transactions
+  const y = S.navDate.getFullYear()
+  const m = S.navDate.getMonth()
+  if (S.mode === 'year')  return S.transactions.filter(t => new Date(t.date).getFullYear() === y)
+  return S.transactions.filter(t => {
+    const d = new Date(t.date)
+    return d.getFullYear() === y && d.getMonth() === m
+  })
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  updatePeriodLabel()
+  updateTopbar()
+  renderSummary()
+  renderTemplates()
+  renderTxList()
+  renderMonthlyChart()
+  renderCategoryChart()
+}
+
+function updatePeriodLabel() {
+  const y = S.navDate.getFullYear()
+  const m = S.navDate.getMonth() + 1
+  const labels = { month: `${y}年${m}月`, year: `${y}年`, all: '全件' }
+  document.getElementById('period-label').textContent = labels[S.mode]
+}
+
+function updateTopbar() {
+  const income  = sumBy(S.transactions, 'income')
+  const expense = sumBy(S.transactions, 'expense')
+  document.getElementById('all-income').textContent  = yen(income)
+  document.getElementById('all-expense').textContent = yen(expense)
+  document.getElementById('all-profit').textContent  = yen(income - expense)
+}
+
+function renderSummary() {
+  const txs     = filteredTx()
+  const incomes = txs.filter(t => t.type === 'income')
+  const expenses = txs.filter(t => t.type === 'expense')
+  const incSum  = incomes.reduce((s, t) => s + allocAmt(t), 0)
+  const expSum  = expenses.reduce((s, t) => s + allocAmt(t), 0)
+  document.getElementById('sum-income').textContent       = yen(incSum)
+  document.getElementById('sum-expense').textContent      = yen(expSum)
+  document.getElementById('sum-profit').textContent       = yen(incSum - expSum)
+  document.getElementById('sum-income-count').textContent  = incomes.length + '件'
+  document.getElementById('sum-expense-count').textContent = expenses.length + '件'
+}
+
+function renderTemplates() {
+  const el = document.getElementById('templates-list')
+  el.innerHTML = ''
+  S.templates.forEach(t => {
+    const card  = document.createElement('div')
+    const alloc = allocAmt(t)
+    card.className = `template-card ${t.type === 'income' ? 'income-type' : 'expense-type'}`
+    card.innerHTML = `
+      <div class="t-name" title="${esc(t.name)}">${esc(t.name)}</div>
+      <div class="t-account">${esc(t.account)}</div>
+      <div class="t-amount">${yen(alloc)}</div>
+      <div class="t-edit">ダブルタップで編集</div>
+    `
+    let clickTimer = null
+    card.addEventListener('click', () => {
+      if (clickTimer) {
+        clearTimeout(clickTimer)
+        clickTimer = null
+        openEditTemplate(t)
+      } else {
+        clickTimer = setTimeout(() => {
+          clickTimer = null
+          applyTemplate(t)
+        }, 250)
+      }
+    })
+    el.appendChild(card)
+  })
+  const addBtn = document.createElement('div')
+  addBtn.className = 'template-add'
+  addBtn.innerHTML = '<span class="template-add-icon">＋</span><span class="template-add-label">追加</span>'
+  addBtn.onclick = openAddTemplate
+  el.appendChild(addBtn)
+}
+
+function renderTxList() {
+  const txs = filteredTx()
+  const el  = document.getElementById('tx-list')
+  if (txs.length === 0) {
+    el.innerHTML = '<div class="empty">取引データがありません</div>'
+    return
+  }
+  el.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>種別</th>
+            <th>勘定科目</th>
+            <th>摘要</th>
+            <th style="text-align:right">元金額</th>
+            <th style="text-align:right">按分率</th>
+            <th style="text-align:right">按分後</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${txs.map(t => `
+            <tr>
+              <td>${t.date}</td>
+              <td><span class="badge ${t.type}">${t.type === 'income' ? '収入' : '経費'}</span></td>
+              <td>${esc(t.account)}</td>
+              <td style="color:var(--muted);font-size:12px">${esc(t.memo || '–')}</td>
+              <td class="amount-cell">${yen(t.amount)}</td>
+              <td class="amount-cell" style="color:var(--muted)">${Math.round(parseFloat(t.allocation_rate) * 100)}%</td>
+              <td class="amount-cell">${yen(allocAmt(t))}</td>
+              <td><button class="del-btn" onclick="deleteTransaction('${t.id}')" title="削除">×</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
+function renderMonthlyChart() {
+  const labels = [], incData = [], expData = []
+  const now = new Date()
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const y = d.getFullYear(), m = d.getMonth()
+    labels.push(`${y === now.getFullYear() ? '' : y + '/'}${m + 1}月`)
+    const month = S.transactions.filter(t => {
+      const td = new Date(t.date)
+      return td.getFullYear() === y && td.getMonth() === m
+    })
+    incData.push(month.filter(t => t.type === 'income').reduce((s, t) => s + allocAmt(t), 0))
+    expData.push(month.filter(t => t.type === 'expense').reduce((s, t) => s + allocAmt(t), 0))
+  }
+  const ctx = document.getElementById('monthly-chart').getContext('2d')
+  if (S.monthlyChart) S.monthlyChart.destroy()
+  S.monthlyChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: '収入', data: incData, backgroundColor: '#3b82f6', borderRadius: 3 },
+        { label: '経費', data: expData, backgroundColor: '#ef4444', borderRadius: 3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 12 } } },
+      scales: {
+        x: { ticks: { font: { size: 10 } } },
+        y: { ticks: { font: { size: 10 }, callback: v => v >= 10000 ? Math.floor(v/10000)+'万' : v } }
+      }
+    }
+  })
+}
+
+function renderCategoryChart() {
+  const expenses = filteredTx().filter(t => t.type === 'expense')
+  const empty    = document.getElementById('category-empty')
+  const canvas   = document.getElementById('category-chart')
+  if (S.categoryChart) { S.categoryChart.destroy(); S.categoryChart = null }
+
+  if (expenses.length === 0) {
+    canvas.style.display = 'none'
+    empty.style.display  = ''
+    return
+  }
+  canvas.style.display = ''
+  empty.style.display  = 'none'
+
+  const byAcc = {}
+  expenses.forEach(t => { byAcc[t.account] = (byAcc[t.account] || 0) + allocAmt(t) })
+  const sorted = Object.entries(byAcc).sort((a, b) => b[1] - a[1]).slice(0, 8)
+
+  S.categoryChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ label: '経費', data: sorted.map(([,v]) => v), backgroundColor: '#f87171', borderRadius: 3 }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 }, callback: v => v >= 10000 ? Math.floor(v/10000)+'万' : v } },
+        y: { ticks: { font: { size: 10 } } }
+      }
+    }
+  })
+}
+
+// ─── CSV ─────────────────────────────────────────────────────────────────────
+function exportDetailCSV(fromReport) {
+  let txs, filename
+  if (fromReport) {
+    const year = parseInt(document.getElementById('report-year').value)
+    txs      = S.transactions.filter(t => new Date(t.date).getFullYear() === year)
+    filename = `収支明細_${year}年.csv`
+  } else {
+    txs = filteredTx()
+    const y = S.navDate.getFullYear(), m = S.navDate.getMonth() + 1
+    filename = S.mode === 'month' ? `収支明細_${y}年${m}月.csv`
+             : S.mode === 'year'  ? `収支明細_${y}年.csv`
+             : '収支明細_全件.csv'
+  }
+  const rows = [['日付','種別','勘定科目','摘要','元金額','按分率(%)','按分後金額']]
+  txs.forEach(t => rows.push([
+    t.date,
+    t.type === 'income' ? '収入' : '経費',
+    t.account,
+    t.memo || '',
+    t.amount,
+    Math.round(parseFloat(t.allocation_rate) * 100),
+    allocAmt(t),
+  ]))
+  dlCSV(rows, filename)
+}
+
+function exportSummaryCSV() {
+  const year = parseInt(document.getElementById('report-year').value)
+  const txs  = S.transactions.filter(t => new Date(t.date).getFullYear() === year)
+  const rows = [['区分','勘定科目','件数','金額合計（按分後）']]
+
+  let totInc = 0, totIncCnt = 0
+  INCOME_ACCOUNTS.forEach(acc => {
+    const items = txs.filter(t => t.type === 'income' && t.account === acc)
+    if (!items.length) return
+    const sum = items.reduce((s, t) => s + allocAmt(t), 0)
+    rows.push(['収入', acc, items.length, sum])
+    totInc += sum; totIncCnt += items.length
+  })
+  rows.push(['収入合計', '', totIncCnt, totInc])
+
+  let totExp = 0, totExpCnt = 0
+  EXPENSE_ACCOUNTS.forEach(acc => {
+    const items = txs.filter(t => t.type === 'expense' && t.account === acc)
+    if (!items.length) return
+    const sum = items.reduce((s, t) => s + allocAmt(t), 0)
+    rows.push(['経費', acc, items.length, sum])
+    totExp += sum; totExpCnt += items.length
+  })
+  rows.push(['経費合計', '', totExpCnt, totExp])
+  rows.push(['差引利益', '', '', totInc - totExp])
+
+  dlCSV(rows, `科目別集計_${year}年.csv`)
+}
+
+function dlCSV(rows, filename) {
+  const bom = '﻿'
+  const csv = bom + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a   = Object.assign(document.createElement('a'), {
+    href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
+    download: filename,
+  })
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+// ─── Form helpers ─────────────────────────────────────────────────────────────
+function setType(type) {
+  S.currentType = type
+  document.querySelectorAll('#main-type-toggle .type-btn').forEach(b =>
+    b.classList.toggle('active', b.classList.contains(type))
+  )
+  updateAccountOptions('f-account', type)
+  document.getElementById('f-alloc-wrap').style.display = type === 'expense' ? '' : 'none'
+}
+
+function setTType(type) {
+  S.tCurrentType = type
+  document.querySelectorAll('#tmodal-type-toggle .type-btn').forEach(b =>
+    b.classList.toggle('active', b.classList.contains(type))
+  )
+  updateAccountOptions('t-account', type)
+  document.getElementById('t-alloc-wrap').style.display = type === 'expense' ? '' : 'none'
+}
+
+function updateAccountOptions(selId, type) {
+  const sel      = document.getElementById(selId)
+  const accounts = type === 'income' ? INCOME_ACCOUNTS : EXPENSE_ACCOUNTS
+  sel.innerHTML  = accounts.map(a => `<option value="${a}">${a}</option>`).join('')
+  if (selId === 'f-account') updateAllocHint()
+}
+
+function updateAllocHint() {
+  const acc  = document.getElementById('f-account').value
+  document.getElementById('alloc-hint').textContent = ALLOC_HINTS[acc] || ''
+}
+
+function populateReportYears() {
+  const sel = document.getElementById('report-year')
+  const now = new Date().getFullYear()
+  for (let y = now; y >= now - 5; y--) {
+    sel.innerHTML += `<option value="${y}">${y}年</option>`
+  }
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+const allocAmt = t => Math.floor(t.amount * parseFloat(t.allocation_rate))
+const sumBy    = (txs, type) => txs.filter(t => t.type === type).reduce((s, t) => s + allocAmt(t), 0)
+const yen      = n => '¥' + n.toLocaleString('ja-JP')
+const todayStr = () => new Date().toISOString().slice(0, 10)
+const clamp    = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+const esc      = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+
+let _toastTimer
+function toast(msg) {
+  const el = document.getElementById('toast')
+  el.textContent = msg
+  el.classList.add('show')
+  clearTimeout(_toastTimer)
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 2500)
+}
+
+// Close modal on overlay click
+document.getElementById('modal-template').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal()
+})
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+init()
+</script>
+</body>
+</html>
